@@ -636,6 +636,13 @@
     (remove #(covers-instance-origin? self %) hosts)
     hosts))
 
+(defn embedded-data-app-content-security-policy
+  "CSP for embedded data apps to be installed inside the data app iframe."
+  [allowed-hosts]
+  (get (content-security-policy-header-with-frame-ancestors
+        :any nil false true (drop-instance-origin allowed-hosts) true)
+       "Content-Security-Policy"))
+
 (defn- cacheable-status?
   "Whether a response with this status may carry a far-future cache header. A 404 for a hashed
   asset is transient: during a rolling deploy a client can ask an instance that does not have the

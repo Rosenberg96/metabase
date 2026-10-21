@@ -11,6 +11,7 @@
    [metabase.api.macros.defendpoint.closed-schemas :as closed-schemas]
    [metabase.lib.core :as lib]
    [metabase.permissions.core :as perms]
+   [metabase.server.middleware.security :as security]
    [metabase.test :as mt]
    [metabase.util.json :as json]
    [toucan2.core :as t2]))
@@ -413,3 +414,36 @@
         (create-app!)
         (is (= 200 (:status (mt/user-http-request-full-response
                              :crowberto :get 200 "apps/sandbox-host"))))))))
+
+(deftest bundle-policy-and-revalidation-test
+  (mt/test-helpers-set-global-values!
+    (mt/with-premium-features #{:data-apps}
+      (mt/with-model-cleanup [:model/DataApp :model/Collection :model/PermissionsGroup]
+        (mt/user-http-request :crowberto :post 200 "apps" app-request)
+        (let [initial (mt/user-http-request-full-response :crowberto :get 200 "apps/demo/bundle")
+              etag (get-in initial [:headers "ETag"])
+              policy-header "X-Metabase-Data-App-Content-Security-Policy"
+              options {:request-options {:headers {"x-metabase-client" "data-app" "if-none-match" etag}}}]
+          (is (= (security/embedded-data-app-content-security-policy (:allowed_hosts app-request))
+                 (get-in initial [:headers policy-header])))
+          (testing "ordinary internal clients retain source-hash revalidation"
+            (mt/user-http-request-full-response :crowberto :get 304 "apps/demo/bundle"
+                                                {:request-options {:headers {"if-none-match" etag}}}))
+          (testing "runtime clients always receive source and current policy together"
+            (let [response (mt/user-http-request-full-response :crowberto :get 200 "apps/demo/bundle" options)]
+              (is (str/includes? (:body response) "DEMOBUNDLE"))
+              (is (= (get-in initial [:headers policy-header]) (get-in response [:headers policy-header])))))
+          (mt/user-http-request :crowberto :put 200 "apps/demo" {:allowed_hosts ["https://other.example.com"]})
+          (let [response (mt/user-http-request-full-response :crowberto :get 200 "apps/demo/bundle" options)]
+            (is (= etag (get-in response [:headers "ETag"])))
+            (is (str/includes? (:body response) "DEMOBUNDLE"))
+            (is (str/includes? (get-in response [:headers policy-header]) "https://other.example.com"))
+            (is (not (str/includes? (get-in response [:headers policy-header]) "https://api.example.com"))))
+          (testing "authorization and app availability are checked before policy disclosure"
+            (doseq [[user path status] [[:rasta "apps/demo/bundle" 403]
+                                        [:crowberto "apps/missing/bundle" 404]]]
+              (is (nil? (get-in (mt/user-http-request-full-response user :get status path options)
+                                [:headers policy-header])))))
+          (mt/user-http-request :crowberto :put 200 "apps/demo" {:enabled false})
+          (is (nil? (get-in (mt/user-http-request-full-response :crowberto :get 404 "apps/demo/bundle" options)
+                            [:headers policy-header]))))))))

@@ -9,6 +9,7 @@ import {
 } from "../loader";
 
 import { describeError } from "./describe-error";
+import { insertContentSecurityPolicyMetaTag } from "./embedded-content-security-policy";
 import { reportErrorToParent } from "./report-error-to-parent";
 
 export interface LoadedApp {
@@ -25,24 +26,36 @@ export interface LoadedApp {
  */
 export const useDataAppBundle = (
   name: string,
+  { embedded = false }: { embedded?: boolean } = {},
 ): {
   data: LoadedApp | null;
   failed: boolean;
+  error?: string | null;
 } => {
   const [data, setData] = useState<LoadedApp | null>(null);
   const [failed, setFailed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     setData(null);
     setFailed(false);
+    setError(null);
 
     const load = async () => {
-      const { code, allowedHosts } = await fetchDataAppBundleCode(name);
+      const { code, allowedHosts, contentSecurityPolicy } =
+        await fetchDataAppBundleCode(name, { embedded });
 
       if (cancelled) {
         return;
+      }
+
+      // Embedded data apps needs to set the CSP via meta tag on the frontend.
+      // CSP contains allowed hosts which we don't want to expose without auth,
+      // so we do client-side auth first, then fetch and inject the CSP policy.
+      if (embedded) {
+        insertContentSecurityPolicyMetaTag(contentSecurityPolicy);
       }
 
       const { component, providerProps } = await instantiateDataAppBundle(
@@ -50,6 +63,7 @@ export const useDataAppBundle = (
         name,
         window,
         allowedHosts,
+        { embedded },
       );
 
       if (cancelled) {
@@ -67,14 +81,21 @@ export const useDataAppBundle = (
         // any other failure carries the real error so it can be shown.
         const detail = notReady ? undefined : describeError(error);
         setFailed(true);
-        reportErrorToParent(notReady, detail);
+
+        if (embedded) {
+          // Embedded data apps shows their own error screen
+          setError(describeError(error).message);
+        } else {
+          // Internal data apps reports the error to the parent
+          reportErrorToParent(notReady, detail);
+        }
       }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [name]);
+  }, [name, embedded]);
 
   useEffect(() => {
     // The bundle runs in a Near-Membrane sandbox that can throw errors which
@@ -93,14 +114,19 @@ export const useDataAppBundle = (
           detail.stack ?? "",
         );
         setFailed(true);
-        reportErrorToParent(false, detail);
+
+        if (embedded) {
+          setError(detail.message);
+        } else {
+          reportErrorToParent(false, detail);
+        }
       }
     };
 
     window.addEventListener("error", onError);
 
     return () => window.removeEventListener("error", onError);
-  }, []);
+  }, [embedded]);
 
-  return { data, failed };
+  return { data, failed, error };
 };

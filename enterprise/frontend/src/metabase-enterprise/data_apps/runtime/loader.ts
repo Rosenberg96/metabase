@@ -3,10 +3,13 @@ import * as ReactDOM from "react-dom";
 import * as ReactDOMClient from "react-dom/client";
 import * as ReactDOMServer from "react-dom/server";
 import * as ReactJsxRuntime from "react/jsx-runtime";
+import { match } from "ts-pattern";
 import { pick } from "underscore";
+import { t } from "ttag";
 
 import * as sdkExports from "embedding-sdk-package";
 import * as dataAppExports from "embedding-sdk-package/data-app";
+import { api } from "metabase/api/client";
 import { DATA_APP_REALM_HOST_URL, getSubpathSafeUrl } from "metabase/urls";
 import { createDataAppSandbox } from "metabase-enterprise/data_apps/sandbox/sandbox";
 import {
@@ -24,6 +27,7 @@ export interface FetchedDataAppBundle {
   code: string;
   /** Origins the sandboxed bundle may fetch/XHR (from `data_app.yaml`). */
   allowedHosts: string[];
+  contentSecurityPolicy?: string | null;
 }
 
 /**
@@ -75,6 +79,7 @@ export class DataAppBundleError extends Error {
  */
 export const fetchDataAppBundleCode = async (
   name: string,
+  { embedded = false }: { embedded?: boolean } = {},
 ): Promise<FetchedDataAppBundle> => {
   const url = getSubpathSafeUrl(
     `/api/apps/${encodeURIComponent(name)}/bundle?t=${Date.now()}`,
@@ -82,7 +87,13 @@ export const fetchDataAppBundleCode = async (
 
   let res: Response;
   try {
-    res = await fetch(url, { cache: "no-store" });
+    res = embedded
+      ? await api.fetch({
+          method: "GET",
+          url: `/api/apps/${encodeURIComponent(name)}/bundle`,
+          cache: "no-store",
+        })
+      : await fetch(url, { cache: "no-store" });
   } catch (e) {
     throw new DataAppBundleError(
       `Failed to reach the server for data-app bundle: ${
@@ -92,13 +103,31 @@ export const fetchDataAppBundleCode = async (
   }
 
   if (!res.ok) {
-    throw new DataAppBundleError(
-      `Failed to fetch data-app bundle: HTTP ${res.status}`,
-      res.status,
-    );
+    const message = match({ embedded, status: res.status })
+      .with(
+        { embedded: true, status: 403 },
+        () => t`You don't have access to this data app.`,
+      )
+      .with(
+        { embedded: true, status: 404 },
+        () =>
+          t`Data app "${name}" was not found or is disabled. Check the app name in path.`,
+      )
+      .otherwise(
+        ({ status }) => `Failed to fetch data-app bundle: HTTP ${status}`,
+      );
+
+    throw new DataAppBundleError(message, res.status);
   }
 
-  return { code: await res.text(), allowedHosts: parseAllowedHostsHeader(res) };
+  return {
+    code: await res.text(),
+    allowedHosts: parseAllowedHostsHeader(res),
+    contentSecurityPolicy: res.headers.get(
+      // eslint-disable-next-line metabase/no-literal-metabase-strings -- HTTP header name
+      "X-Metabase-Data-App-Content-Security-Policy",
+    ),
+  };
 };
 
 /**
@@ -112,12 +141,15 @@ export const instantiateDataAppBundle = async (
   label: string,
   targetWindow: Window & typeof globalThis,
   allowedHosts: string[] = [],
+  { embedded = false }: { embedded?: boolean } = {},
 ): Promise<LoadedDataApp> => {
   const sandbox = await createDataAppSandbox({
     label,
     targetWindow,
     allowedHosts,
-    realmHostUrl: getSubpathSafeUrl(DATA_APP_REALM_HOST_URL),
+    realmHostUrl: getSubpathSafeUrl(
+      embedded ? "/api/apps/embedded-sandbox-host" : DATA_APP_REALM_HOST_URL,
+    ),
     endowments: {
       React,
       reactDom: ReactDOM,

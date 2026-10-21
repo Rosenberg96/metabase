@@ -3827,6 +3827,7 @@
            audit-app
            collections
            events
+           embedding
            lib
            lib.be
            lib.schema
@@ -3839,6 +3840,7 @@
            queries
            remote-sync
            request
+           server
            settings
            system
            users
