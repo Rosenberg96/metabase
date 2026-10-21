@@ -373,8 +373,12 @@
           (is (=? {:name "demo" :enabled false}
                   (mt/user-http-request :crowberto :put 200 "apps/demo" {:enabled false}))))
         (testing "a disabled app is not served"
-          (is (= "Not found." (mt/user-http-request :crowberto :get 404 "apps/demo")))
-          (mt/user-real-request :crowberto :get 404 "apps/demo/bundle"))
+          (is (= "Not found." (mt/user-http-request :rasta :get 404 "apps/demo")))
+          (mt/user-real-request :rasta :get 404 "apps/demo/bundle"))
+        (testing "a superuser still reads a disabled app's metadata and bundle"
+          (is (=? {:name "demo" :enabled false}
+                  (mt/user-http-request :crowberto :get 200 "apps/demo")))
+          (mt/user-real-request :crowberto :get 200 "apps/demo/bundle"))
         (testing "re-enabling restores serving"
           (is (=? {:enabled true}
                   (mt/user-http-request :crowberto :put 200 "apps/demo" {:enabled true})))

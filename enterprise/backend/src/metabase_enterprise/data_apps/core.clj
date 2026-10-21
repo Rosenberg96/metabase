@@ -14,8 +14,9 @@
   warnings])
 
 (defenterprise check-data-app-access!
-  "Checks that the user belongs to one of the assigned groups"
+  "Checks that the user belongs to one of the assigned groups; superusers also reach disabled apps."
   :feature :data-apps
   [request]
-  (let [app (api/check-404 (data-apps.db/enabled-data-app-by-slug (get-in request [:route-params :name])))]
+  (let [app (data-apps.db/data-app-by-slug (get-in request [:route-params :name]))]
+    (api/check-404 (and app (or (:enabled app) (:is-superuser? request))))
     (api/check-403 (mi/can-read? app))))

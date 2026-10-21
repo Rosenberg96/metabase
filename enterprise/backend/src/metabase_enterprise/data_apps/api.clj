@@ -165,6 +165,12 @@
     (assoc app :outdated (data-app.config/outdated? app))
     (select-keys app [:name :display_name])))
 
+(defn- check-served
+  "`app`, or a 404 when it is missing or disabled and the current user is not a superuser."
+  [app]
+  (api/check-404 (and app (or (:enabled app) api/*is-superuser?*)))
+  app)
+
 (defn- read-check-data-app
   "Check whether the current user can access a data app. Viewing requires read access to the app's
    resource collection, which every app has."
@@ -352,13 +358,13 @@
 ;; what iframe to render, before any data-app realm exists, so the request never carries the
 ;; marker. The bundle is fetched from inside that iframe, where it does.
 (api.macros/defendpoint :get ["/:slug" :slug slug-regex] :- [:or DataAppResponse PublicDataAppResponse]
-  "Fetch metadata for a single enabled data app by its slug."
+  "Fetch metadata for a single data app by its slug, disabled ones to superusers only."
   [{:keys [slug]} :- [:map {:closed true} [:slug ms/NonBlankString]]]
-  (let [app (read-check-data-app (data-apps.db/enabled-data-app-by-slug slug))]
+  (let [app (read-check-data-app (check-served (data-apps.db/data-app-by-slug slug)))]
     (data-app-response (cond-> app (not api/*is-superuser?*) check-not-outdated))))
 
 (api.macros/defendpoint :get ["/:slug/bundle" :slug slug-regex] :- :any
-  "Serve the cached JS bundle for a single enabled data app by slug. Honors
+  "Serve the cached JS bundle for a single data app by slug, disabled ones to superusers only. Honors
    `If-None-Match` against the content-hash ETag with a 304."
   {:scope api-scope/data-app}
   [{:keys [slug]} :- [:map {:closed true} [:slug ms/NonBlankString]]
@@ -368,7 +374,7 @@
    respond
    raise]
   (try
-    (let [row  (check-not-outdated (read-check-data-app (data-apps.db/enabled-data-app-by-slug slug)))
+    (let [row  (check-not-outdated (read-check-data-app (check-served (data-apps.db/data-app-by-slug slug))))
           hash (:bundle_hash row)
           etag (some->> hash (format "\"%s\""))]
       (cond

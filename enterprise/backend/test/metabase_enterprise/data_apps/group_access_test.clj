@@ -213,6 +213,20 @@
         (is (true? (data-apps/check-data-app-access!
                     {:route-params {:name "birds"} :metabase-user-id (mt/user->id :rasta)})))))))
 
+(deftest disabled-app-access-test
+  (mt/with-premium-features #{:data-apps}
+    (mt/with-temp [:model/DataApp app {:name "birds" :display_name "Birds" :bundle_path "birds.js" :enabled false}]
+      (group-access/add-groups! app [(:id (perms/all-users-group))])
+      (testing "a superuser reaches a disabled app"
+        (mt/with-current-user (mt/user->id :crowberto)
+          (is (true? (data-apps/check-data-app-access!
+                      {:route-params {:name "birds"} :metabase-user-id (mt/user->id :crowberto) :is-superuser? true})))))
+      (testing "a user with group access does not"
+        (mt/with-current-user (mt/user->id :rasta)
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not found"
+                                (data-apps/check-data-app-access!
+                                 {:route-params {:name "birds"} :metabase-user-id (mt/user->id :rasta)}))))))))
+
 (deftest group-endpoints-require-feature-test
   (mt/with-premium-features #{:data-apps}
     (mt/with-temp [:model/DataApp app {:name "birds" :display_name "Birds" :bundle_path "birds.js"}

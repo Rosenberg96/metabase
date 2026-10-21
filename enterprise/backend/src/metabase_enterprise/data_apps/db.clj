@@ -28,11 +28,6 @@
   [slug :- :string]
   (t2/select-one non-blob-model :name slug))
 
-(mu/defn enabled-data-app-by-slug
-  "The enabled DataApp named `slug` without its bundle, or nil."
-  [slug :- :string]
-  (t2/select-one non-blob-model :name slug :enabled true))
-
 (mu/defn data-apps
   "Every DataApp without its bundle, ordered by display name; only the enabled ones when `available?`."
   [available? :- [:maybe :boolean]]
