@@ -9,8 +9,7 @@
    [metabase.lib.core :as lib]
    [metabase.models.interface :as mi]
    [metabase.models.serialization :as serdes]
-   [metabase.premium-features.core :refer [defenterprise]]
-   [metabase.users.models.user :as user]
+   [metabase.premium-features.core :as premium-features :refer [defenterprise]]
    [metabase.util.i18n :refer [tru]]
    [metabase.util.malli :as mu]
    [methodical.core :as methodical]
@@ -104,12 +103,10 @@
 (defmethod mi/can-read? :model/DataApp
   ([app] (mi/can-read? :model/DataApp (:id app)))
   ([_model pk]
-   (or api/*is-superuser?*
-       (and api/*current-user-id*
-            (nil? (:tenant_id @api/*current-user*))
-            (let [group-ids (user/group-ids api/*current-user-id*)]
-              (boolean (some (comp group-ids :permission_group_id)
-                             (data-apps.db/app-assignments [pk]))))))))
+   (and (premium-features/has-feature? :data-apps)
+        (or api/*is-superuser?*
+            (and (some? api/*current-user-id*)
+                 (data-apps.db/readable-data-app? api/*current-user-id* pk))))))
 
 (defmethod mi/can-write? :model/DataApp
   ([_instance]   api/*is-superuser?*)
