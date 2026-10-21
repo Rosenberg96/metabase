@@ -3906,6 +3906,7 @@
            app-db
            batch-processing
            collections
+           data-apps
            database-routing
            documents
            driver
@@ -3941,6 +3942,7 @@
                     :model/DashboardCard
                     :model/DashboardCardSeries
                     :model/DashboardTab
+                    :model/DataApp
                     :model/Database
                     :model/Dimension
                     :model/Document
